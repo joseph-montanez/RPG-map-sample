@@ -1,0 +1,178 @@
+function init(self)
+	msg.post(".", "acquire_input_focus")
+	msg.post("#collider", "disable")
+	msg.post("#axeCollider", "disable")
+	
+	self.anim = nil
+	self.axe = false
+	
+	self.input = vmath.vector3()
+	self.pp = vmath.vector3()
+	self.velocity = vmath.vector3()
+	self.facing = vmath.vector3(0, -1, 0)
+	self.correction = vmath.vector3()
+end
+
+local function anim(self)
+	local f = "hero-front"
+	if self.facing.y > 0 then
+		f = "hero-back"
+	elseif self.facing.x > 0 then
+		f = "hero-right"
+	elseif self.facing.x < 0 then
+		f = "hero-left"
+	end
+	
+	local a = hash(f .. "-idle")
+	local moving = vmath.length_sqr(self.velocity) > 0.01
+	if moving then
+		a = hash(f .. "-walk")
+	end
+
+	if a ~= self.anim then
+		self.anim = a
+		msg.post("#sprite", "play_animation", { id = self.anim })
+	end
+end
+
+function update(self, dt)
+	if vmath.length_sqr(self.input) > 1 then
+		self.input = vmath.normalize(self.input)
+	end
+
+	if vmath.length_sqr(self.input) > 0 then
+		self.facing = self.input
+	end
+	
+	anim(self)
+
+	local p = go.get_position()
+	local newp = p + self.input * 150 * dt
+	go.set_position(newp)
+	
+
+	if (self.axe) then
+		msg.post("#axe", "enable")
+		msg.post("#axeCollider", "enable")
+		self.axe = false
+	else
+		msg.post("#axe", "disable")
+		msg.post("#axeCollider", "disable")
+	end
+
+	-- trigger load at screen edges
+	if newp.y > 768 then
+		msg.post("/game#script", "load_screen", { dir = hash("up") })
+	elseif newp.y < 0 then
+		msg.post("/game#script", "load_screen", { dir = hash("down") })
+	elseif newp.x > 1280 then
+		msg.post("/game#script", "load_screen", { dir = hash("right") })
+	elseif newp.x < 0 then
+		msg.post("/game#script", "load_screen", { dir = hash("left") })
+	end
+
+	self.velocity = p - self.pp		
+	self.pp = p
+	self.input = vmath.vector3()
+	self.correction = vmath.vector3()
+end
+
+local enters = { [hash("center")] = vmath.vector3(0, 0, 0),
+				 [hash("up")] = vmath.vector3(0, 32, 0),
+				 [hash("down")] = vmath.vector3(0, -32, 0),
+				 [hash("right")] = vmath.vector3(32, 0, 0),
+				 [hash("left")] = vmath.vector3(-32, 0, 0) }
+
+local function activate(self)
+	msg.post(".", "acquire_input_focus")					
+	msg.post("#collider", "enable")
+end
+
+function on_message(self, message_id, message, sender)
+	if message_id == hash("enter_screen") then
+		-- don't allow player to mess with input while hero walks into screen.
+		msg.post(".", "release_input_focus")					
+		-- animate in from the edge into next screen, then activate.
+		local p = go.get_position()
+		local dp = enters[message.dir]
+		go.animate(".", "position", go.PLAYBACK_ONCE_FORWARD, p+dp, go.EASING_LINEAR, 0.3, 0, activate)
+	elseif message_id == hash("contact_point_response") then
+		print("hero contact_point_response")
+		-- { 
+		-- 	["normal"] = vmath.vector3(0, 1, 0),
+		-- 	["position"] = vmath.vector3(695.55926513672, 412.90823364258, 0),
+		-- 	["other_position"] = vmath.vector3(0, 0, 0),
+		-- 	["own_group"] = hash: [hero],
+		-- 	["relative_velocity"] = vmath.vector3(0, 0, 0),
+		-- 	["other_group"] = hash: [blocker],
+		-- 	["other_id"] = hash: [/collection0/map],
+		-- 	["other_mass"] = 0,
+		-- 	["group"] = hash: [blocker],
+		-- 	["applied_impulse"] = 0,
+		-- 	["distance"] = 0,
+		-- 	["life_time"] = 0,
+		-- 	["mass"] = 0,
+		-- } 
+
+		-- print("hero - contact_point_response")
+		-- print(message.other_group)
+		-- simple collision solver
+		local proj = vmath.dot(self.correction, message.normal)
+		local comp = (message.distance - proj) * message.normal
+		self.correction = self.correction + comp
+		go.set_position(go.get_position() + comp)
+
+		-- print("hero", tilemap.get_tile("main:" .. hash_to_hex(message.other_id) .. "#tiles", "level1", 23, 13))
+		
+	elseif message_id == hash("collision_response") then
+		-- print("hero collision_response")
+		-- {
+		-- 	["other_group"] = hash: [blocker],
+		-- 	["other_position"] = vmath.vector3(0, 0, 0),
+		-- 	["own_group"] = hash: [hero],
+		-- 	["group"] = hash: [blocker],
+		-- 	["other_id"] = hash: [/collection0/map],
+		-- } 
+
+
+		-- print("hero - collision_response")
+
+		if (message.other_group == hash("blocker")) then
+			-- print("You hit a blocker, do something!")
+			-- print(dump(tilemap.get_tile("/map#tiles", "grass", 1, 1)))
+			-- print(dump(tilemap.get_tile("/game/map#tiles", "grass", 1, 1)))
+			-- print(dump(tilemap.get_tile("/game/#factory-0-0/map#tiles", "grass", 1, 1)))
+			-- print(dump(tilemap.get_bounds("/game/factory-0-0/map#tiles")))
+			-- print(dump(tilemap.get_bounds("/game/map#tiles")))
+			-- print(tilemap.get_bounds("0-0:/map#tiles"))
+			-- print(tilemap.get_bounds("/game#factory-0-0"))
+
+			-- msg.post("0-0:/map", "collision", { dir = self.dir })
+		end
+
+	elseif message_id == hash("collision_tile") then
+		print("hero collision_tile")
+		pprint(message)
+	elseif message_id == hash("trigger_response") then
+		print("trigger_response")
+		-- print(message.other_id)
+		-- print(message.enter)
+	end
+end
+
+function on_input(self, action_id, action)
+	if action_id == hash("north") then
+		self.input.y = 1
+	elseif action_id == hash("south") then
+		self.input.y = -1
+	elseif action_id == hash("east") then
+		self.input.x = 1
+	elseif action_id == hash("west") then
+		self.input.x = -1
+	end
+
+	if action_id == hash("click") then
+		self.axe = true
+	end
+	
+end
